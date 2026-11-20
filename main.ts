@@ -1,49 +1,39 @@
-// News-image-19 v2 entrypoint: copies the composed front page to /output.
-//
-// Node 22, standard library only, no network. Deterministic: the same
-// entry.png bytes are copied on every run, so both grader runs agree.
-// The image itself is built ahead of time by compose.py (Pillow); this
-// program only verifies it and copies it into place.
-import { copyFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
+// Entry point for the make.fun news-image-20261119 bounty.
+// Copies the pre-built entry.png (1024x1024, drawn procedurally by
+// compose.py) into the output directory. Node 22 stdlib only.
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MAX_BYTES = 1048576; // 1 MiB
-const MAX_DIM = 1024; // pixels per side
-
 const here = dirname(fileURLToPath(import.meta.url));
-const source = join(here, "entry.png");
-const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
-const target = join(outDir, "entry.png");
+const src = join(here, "entry.png");
+const outDir = process.env.MAKEFUN_OUTPUT_DIR || "/output";
+const dest = join(outDir, "entry.png");
 
-const stat = statSync(source);
-if (stat.size > MAX_BYTES) {
-  throw new Error(
-    `entry.png is ${stat.size} bytes, over the ${MAX_BYTES} byte limit`,
-  );
+if (!existsSync(src)) {
+  console.error(`entry.png not found at ${src}`);
+  process.exit(1);
 }
 
-const data = readFileSync(source);
-if (data.length < 33) {
-  throw new Error("entry.png is truncated: too short to hold a PNG header");
+// Validate the PNG before copying: 8-byte signature, then the IHDR chunk
+// must declare a 1024x1024 image.
+const buf = readFileSync(src);
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+if (buf.length < 33 || !buf.subarray(0, 8).equals(PNG_SIG)) {
+  console.error("entry.png is not a valid PNG (bad signature)");
+  process.exit(1);
 }
-const head = data.subarray(0, 33);
-const PNG_SIG = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-]);
-if (!head.subarray(0, 8).equals(PNG_SIG)) {
-  throw new Error("entry.png is not a PNG file");
+if (buf.toString("ascii", 12, 16) !== "IHDR") {
+  console.error("entry.png has no IHDR chunk where expected");
+  process.exit(1);
 }
-const width = head.readUInt32BE(16);
-const height = head.readUInt32BE(20);
-if (width > MAX_DIM || height > MAX_DIM) {
-  throw new Error(
-    `entry.png is ${width}x${height}, over the ${MAX_DIM}x${MAX_DIM} limit`,
-  );
+const width = buf.readUInt32BE(16);
+const height = buf.readUInt32BE(20);
+if (width !== 1024 || height !== 1024) {
+  console.error(`entry.png is ${width}x${height}, expected 1024x1024`);
+  process.exit(1);
 }
-
+console.log(`entry.png validated: 1024x1024, ${buf.length} bytes`);
 mkdirSync(outDir, { recursive: true });
-copyFileSync(source, target);
-console.log(
-  `copied entry.png (${stat.size} bytes, ${width}x${height}) to ${target}`,
-);
+copyFileSync(src, dest);
+console.log(`copied entry.png -> ${dest}`);
